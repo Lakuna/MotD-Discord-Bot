@@ -136,6 +136,22 @@ client.on("shardError", (error) => console.error(error));
 client.on("ready", async () => {
 	console.log("Ready.");
 	client.user.setActivity("Meme of the Day");
+
+	/*
+	Log commands:
+	console.log(await client.app.commands.get());
+
+	Create command:
+	await client.app.commands.post({
+		data: {
+			name: "command_name",
+			description: "command_description"
+		}
+	});
+
+	Delete command:
+	await client.app.commands('command_id').delete();
+	*/
 });
 
 client.ws.on("INTERACTION_CREATE", async (interaction) => {
