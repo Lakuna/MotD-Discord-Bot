@@ -1,0 +1,29 @@
+{
+  "name": "motd-discord-bot",
+  "version": "1.0.0",
+  "description": "A barebones Meme of the Day bot for Discord.",
+  "homepage": "https://lakuna.pw",
+  "bugs": {
+    "url": "https://github.com/Lakuna/MotD-Discord-Bot/issues",
+    "email": "tjmartin2003@gmail.com"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Travis Martin",
+    "email": "tjmartin2003@gmail.com",
+    "url": "https://lakuna.pw"
+  },
+  "funding": "https://github.com/sponsors/Lakuna",
+  "main": "index.js",
+  "scripts": {
+    "test": "exit 0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lakuna/MotD-Discord-Bot.git"
+  },
+  "dependencies": {
+    "discord.js": "^12.5.3",
+    "dotenv": "^10.0.0"
+  }
+}
