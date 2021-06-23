@@ -114,215 +114,162 @@ class Snowflake {
 }
 
 // Create client.
+// Invite link: // https://discord.com/api/oauth2/authorize?client_id=857292742120308756&permissions=117824&scope=applications.commands%20bot
 const client = new Client({
 	partials: [ "GUILD_MEMBER", "MESSAGE", "REACTION" ],
 	ws: { intents: [ "GUILDS", "GUILD_MESSAGE_REACTIONS" ] }
 });
-// https://discord.com/api/oauth2/authorize?client_id=857292742120308756&permissions=117824&scope=applications.commands%20bot
 
 // Application getter.
-Object.defineProperty(client, 'app', { get: () => {
-	const app = client.api.applications(client.user.id);
-	if (process.env.TEST_GUILD_ID) { app.guilds(process.env.TEST_GUILD_ID); }
-	return app;
-}});
+Object.defineProperty(client, "app", { get: () => client.api.applications(client.user.id) });
 
-// Meme vote reactions.
+// Emoji identifiers.
 const UPVOTE_IDENTIFIER = "%E2%9C%85"; // :white_check_mark:
 const DOWNVOTE_IDENTIFIER = "%E2%9D%8E"; // :negative_squared_cross_mark:
 
-// Time in a day.
+// Time in a day (milliseconds).
 const DAY_LENGTH = 1000 * 60 * 60 * 24;
 
 // Colors.
-const WARNING_COLOR = "#FDEE00";
-const ERROR_COLOR = "#FF2400";
-const SUCCESS_COLOR = "#32CD32";
+const SUCCESS_COLOR = "#50C878";
+const WARNING_COLOR = "#FFE791";
+const ERROR_COLOR = "C80815";
 
 // Error handling.
-client.on("error", (error) => console.error(error));
-client.on("shardError", (error) => console.error(error));
+client.on("error", console.error);
+client.on("shardError", console.error);
 
-// On ready.
-client.on("ready", async () => {
-	console.log("Ready.");
-	client.user.setActivity("Meme of the Day");
+// Startup.
+client.on("ready", () => client.user.setActivity("Meme of the Day"));
 
-	/*
-	Print commands:
-	console.log(await client.app.commands.get());
-
-	Create command:
-	// https://discord.com/developers/docs/interactions/slash-commands#registering-a-command
-	await client.app.commands.post({
-		data: {
-			name: "command_name",
-			description: "command_description"
-		}
-	});
-
-	Delete command:
-	// https://discord.com/developers/docs/interactions/slash-commands#updating-and-deleting-a-command
-	await client.app.commands('command_id').delete();
-	*/
-});
-
+// Handle slash commands.
 client.ws.on("INTERACTION_CREATE", async (interaction) => {
-	// https://discord.com/developers/docs/interactions/slash-commands#responding-to-an-interaction
+	const sendEmbed = async (embed) => {
+		const embedToAPIMessage = async (embed) => {
+			const { data, files } = await APIMessage.create(client.channels.resolve(interaction.channel_id), embed)
+				.resolveData()
+				.resolveFiles();
+
+			return { ...data, files };
+		};
+
+		client.api.interactions(interaction.id, interaction.token).callback.post({
+			data: {
+				type: 4,
+				data: await embedToAPIMessage(embed)
+			}
+		});
+	};
 
 	switch (interaction.data.name) {
 		case "motd":
-			return new Promise((resolve, reject) => {
-				const getAllMessagesSince = (channel, snowflake, output = []) => new Promise((resolve, reject) => {
-					channel.messages.fetch({ limit: 100, before: output.length ? Math.min(...output.map((message) => message.id)) : interaction.id }, false)
-						.then((messages) => {
-							messages = Array.from(messages.values());
-							for (const message of messages) {
-								if (message.id >= snowflake) {
-									output.push(message);
-								} else {
-									break;
-								}
-							}
+			const getMessagesSince = async (channel, snowflake, output = []) => {
+				let messages;
 
-							if (!output.length) {
-								return resolve([]);
-							}
+				// Get a group of 100 messages from a channel.
+				try {
+					messages = Array.from((await channel.messages.fetch({
+						limit: 100,
+						before: output.length
+							? Math.min(...output.map((message) => message.id))
+							: interaction.id
+					}, false)).values());
+				} catch { return []; } // Bot doesn't have permission to fetch messages from this channel.
 
-							if (output.length % 100 == 0) {
-								return getAllMessagesSince(channel, snowflake, output).then((messages) => resolve(messages));
-							}
-
-							return resolve(output);
-						})
-						.catch((error) => resolve([])); // Missing permissions; ignore channel.
-				});
-
-				client.guilds.fetch(interaction.guild_id).then((guild) => {
-					let output = [];
-					let fetched = 0;
-					const channels = Array.from(guild.channels.cache.values())
-						.filter((channel) => channel.type == "text" && channel.guild.me.permissionsIn(channel).has("VIEW_CHANNEL"));
-
-					for (const channel of channels) {
-						getAllMessagesSince(channel, new Snowflake((new Date(new Date() - DAY_LENGTH))))
-							.then((messages) => output = output.concat(messages))
-							.catch((error) => console.error(error))
-							.finally(() => {
-								fetched++;
-								if (fetched >= channels.length) { resolve(output); }
-							});
-					}
-				});
-			})
-			.then((messages) => {
-				let bestMeme;
+				// Add messages to output if they're newer than the snowflake.
 				for (const message of messages) {
-					const upvoteReaction = message.reactions.cache.find((reaction) => reaction.emoji.identifier == UPVOTE_IDENTIFIER);
-					const upvotes = upvoteReaction ? upvoteReaction.count : 0;
-
-					const downvoteReaction = message.reactions.cache.find((reaction) => reaction.emoji.identifier == DOWNVOTE_IDENTIFIER);
-					const downvotes = downvoteReaction ? downvoteReaction.count : 0;
-
-					const meme = {
-						message: message,
-						score: upvotes - downvotes
-					};
-
-					if (!bestMeme || bestMeme.score < meme.score) {
-						bestMeme = meme;
-					}
+					if (message.id >= snowflake) { output.push(message); } else { break; }
 				}
 
-				if (!bestMeme) {
-					return new MessageEmbed()
-						.setColor(WARNING_COLOR)
-						.setTitle("Failed to find any candidates.");
+				// Return an empty array if no messages were added.
+				if (!output.length) { return []; }
+
+				// If not all of the fetched messages were added to the output, return.
+				if (output.length % 100) { return output; }
+
+				// If all of the fetched messages were added to the output, recursively look for more.
+				return await getMessagesSince(channel, snowflake, output);
+			};
+
+			// Get all messages sent in the last day from all channels.
+			let messages = [];
+			const guild = await client.guilds.fetch(interaction.guild_id);
+			const channels = Array.from(guild.channels.cache.values())
+				.filter((channel) => channel.type == "text" && channel.guild.me.permissionsIn(channel).has("VIEW_CHANNEL"));
+			for (const channel of channels) {
+				try {
+					messages = messages.concat(await getMessagesSince(channel, new Snowflake((new Date(new Date() - DAY_LENGTH)))));
+				} catch (error) {
+					return sendEmbed(new MessageEmbed()
+						.setColor(ERROR_COLOR)
+						.setTitle("Error fetching messages.")
+						.addField("Channel", `${channel}`)
+						.addField("Error", `${error}`));
 				}
+			}
 
-				const output = new MessageEmbed()
-					.setColor(SUCCESS_COLOR)
-					.setTitle(`Meme of the Day ${new Date().getMonth() + 1}/${new Date().getDate()}/${new Date().getFullYear()}`)
-					.setDescription(bestMeme.message.content)
-					.setURL(bestMeme.message.url)
-					.addField("Author", `${bestMeme.message.author}`, true)
-					.addField("Score", bestMeme.score, true);
-
-				const attachments = [];
-
-				// Get attachments from message content.
-				for (const word of bestMeme.message.content.split(/ +/)) {
-					if (word.startsWith("http")) { attachments.push(word); }
-				}
-
-				// Get attachments from message attachments.
-				for (const attachment of bestMeme.message.attachments.values()) {
-					attachments.push(attachment.url);
-				}
-
-				if (attachments.length == 1) {
-					if (attachments[0].endsWith(".png")
-						|| attachments[0].endsWith(".jpg")
-						|| attachments[0].endsWith(".jpeg")
-						|| attachments[0].endsWith(".gif")) {
-						output.setImage(attachments[0]);
-					} else {
-						output.attachFiles(attachments);
-					}
-				} else {
-					output.attachFiles(attachments);
-				}
-
-				return output;
-			}).then(async (embed) => {
-				const embedToAPIMessage = async (embed) => {
-					const { data, files } = await APIMessage.create(client.channels.resolve(interaction.channel_id), embed)
-						.resolveData()
-						.resolveFiles();
-
-					return { ...data, files };
+			// Find the best meme.
+			let bestMeme;
+			const reactionCount = (message, identifier) => message.reactions.cache.find((reaction) => reaction.emoji.identifier == identifier)?.count ?? 0;
+			for (const message of messages) {
+				const meme = {
+					message: message,
+					score: reactionCount(message, UPVOTE_IDENTIFIER) - reactionCount(message, DOWNVOTE_IDENTIFIER)
 				};
+				
+				bestMeme = (bestMeme?.score ?? 0) < meme.score ? meme : bestMeme;
+			}
+			if (!bestMeme) {
+				return sendEmbed(new MessageEmbed()
+					.setColor(WARNING_COLOR)
+					.setTitle("Failed to locate any candidates."));
+			}
 
-				client.api.interactions(interaction.id, interaction.token).callback.post({
-					data: {
-						type: 4,
-						data: await embedToAPIMessage(embed)
-					}
+			// Create output message.
+			const output = new MessageEmbed()
+				.setColor(SUCCESS_COLOR)
+				.setTitle(`Meme of the Day ${new Date().getMonth() + 1}/${new Date().getDate()}/${new Date().getFullYear()}`)
+				.setDescription(bestMeme.message.content)
+				.setURL(bestMeme.message.url)
+				.addField("Author", `${bestMeme.message.author}`, true)
+				.addField("Score", bestMeme.score, true);
+
+			// Find attachments.
+			const attachments = [];
+			for (const word of bestMeme.message.content.split(/  +/)) {
+				if (word.startsWith("http")) { attachments.push(word); }
+			}
+			for (const attachment of bestMeme.message.attachments.values()) {
+				attachments.push(attachment.url);
+			}
+
+			// Add attachments to output message.
+			if (attachments.length == 1) {
+				[".png", ".jpg", ".jpeg", ".gif"].forEach((extension) => {
+					// Special case if there is only one attachment and it's an image.
+					if (attachments[0].endsWith(extension)) { output.setImage(attachments[0]); }
 				});
-			})
-			.catch((error) => console.error(error));
+			}
+			if (!output.image) { output.attachFiles(attachments); }
+
+			return sendEmbed(output);
 	}
 });
 
-client.on("messageReactionAdd", (reaction, user) => {
-	const onFetchMember = (member) => {
-		if (reaction.emoji.identifier != UPVOTE_IDENTIFIER && reaction.emoji.identifier != DOWNVOTE_IDENTIFIER) { return; }
-		if (reaction.message.author.bot) { return; }
+// Add reactions.
+client.on("messageReactionAdd", async (reaction, user) => {
+	if (user.bot) { return; }
+	if (reaction.emoji.identifier != UPVOTE_IDENTIFIER && reaction.emoji.identifier != DOWNVOTE_IDENTIFIER) { return; }
+	if (reaction.message.author?.bot) { return; }
 
-		reaction.message.react(UPVOTE_IDENTIFIER);
-		reaction.message.react(DOWNVOTE_IDENTIFIER);
-	};
+	// Fetch the reaction message, in case it's a partial.
+	try { await reaction.message.fetch(); } catch (error) { console.error(`Error fetching reaction message: ${error}`); }
+	try {
+		await reaction.message.guild.members.cache.find((member) => member.user == user).fetch();
+	} catch (error) { console.error(`Error fetching reaction member: ${error}`); }
 
-	const onFetchMessage = () => {
-		if (user.bot) { return; }
-
-		const member = reaction.message.guild.members.cache.find((member) => member.user == user);
-		if (member.partial) {
-			member.fetch()
-				.then(() => onFetchMember(member))
-				.catch((error) => console.error(error));
-		} else {
-			onFetchMember(member);
-		}
-	}
-
-	if (reaction.message.partial) {
-		reaction.message.fetch()
-			.then(() => onFetchMessage())
-			.catch((error) => console.error(error));
-	} else {
-		onFetchMessage();
-	}
+	reaction.message.react(UPVOTE_IDENTIFIER);
+	reaction.message.react(DOWNVOTE_IDENTIFIER);
 });
 
 // Login.
