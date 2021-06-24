@@ -114,7 +114,7 @@ class Snowflake {
 }
 
 // Create client.
-// Invite link: // https://discord.com/api/oauth2/authorize?client_id=857292742120308756&permissions=117824&scope=applications.commands%20bot
+// Invite link: https://discord.com/api/oauth2/authorize?client_id=857292742120308756&permissions=117824&scope=applications.commands%20bot
 const client = new Client({
 	partials: [ "GUILD_MEMBER", "MESSAGE", "REACTION" ],
 	ws: { intents: [ "GUILDS", "GUILD_MESSAGE_REACTIONS" ] }
