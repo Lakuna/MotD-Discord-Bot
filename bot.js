@@ -131,9 +131,9 @@ const DOWNVOTE_IDENTIFIER = "%E2%9D%8E"; // :negative_squared_cross_mark:
 const DAY_LENGTH = 1000 * 60 * 60 * 24;
 
 // Colors.
-const SUCCESS_COLOR = "#50C878";
-const WARNING_COLOR = "#FFE791";
-const ERROR_COLOR = "C80815";
+const SUCCESS_COLOR = 0x50C878;
+const WARNING_COLOR = 0xFFE791;
+const ERROR_COLOR = 0xC80815;
 
 // Error handling.
 client.on("error", console.error);
@@ -144,23 +144,6 @@ client.on("ready", () => client.user.setActivity("Meme of the Day"));
 
 // Handle slash commands.
 client.ws.on("INTERACTION_CREATE", async (interaction) => {
-	const sendEmbed = async (embed) => {
-		const embedToAPIMessage = async (embed) => {
-			const { data, files } = await APIMessage.create(client.channels.resolve(interaction.channel_id), embed)
-				.resolveData()
-				.resolveFiles();
-
-			return { ...data, files };
-		};
-
-		client.api.interactions(interaction.id, interaction.token).callback.post({
-			data: {
-				type: 4,
-				data: await embedToAPIMessage(embed)
-			}
-		});
-	};
-
 	switch (interaction.data.name) {
 		case "motd":
 			const getMessagesSince = async (channel, snowflake, output = []) => {
@@ -200,11 +183,28 @@ client.ws.on("INTERACTION_CREATE", async (interaction) => {
 				try {
 					messages = messages.concat(await getMessagesSince(channel, new Snowflake((new Date(new Date() - DAY_LENGTH)))));
 				} catch (error) {
-					return sendEmbed(new MessageEmbed()
-						.setColor(ERROR_COLOR)
-						.setTitle("Error fetching messages.")
-						.addField("Channel", `${channel}`)
-						.addField("Error", `${error}`));
+					return client.api.interactions(interaction.id, interaction.token).callback.post({
+						data: {
+							type: 4,
+							data: {
+								embeds: [{
+									title: "Error fetching messages.",
+									type: "rich",
+									color: ERROR_COLOR,
+									fields: [
+										{
+											name: "Channel",
+											value: `${channel}`,
+										},
+										{
+											name: "Error",
+											value: `${error}`
+										}
+									]
+								}]
+							}
+						}
+					});
 				}
 			}
 
@@ -220,23 +220,49 @@ client.ws.on("INTERACTION_CREATE", async (interaction) => {
 				bestMeme = (bestMeme?.score ?? 0) < meme.score ? meme : bestMeme;
 			}
 			if (!bestMeme) {
-				return sendEmbed(new MessageEmbed()
-					.setColor(WARNING_COLOR)
-					.setTitle("Failed to locate any candidates."));
+				return client.api.interactions(interaction.id, interaction.token).callback.post({
+					data: {
+						type: 4,
+						data: {
+							embeds: [{
+								title: "Failed to locate any candidates.",
+								type: "rich",
+								color: WARNING_COLOR
+							}]
+						}
+					}
+				});
 			}
 
 			// Create output message.
-			const output = new MessageEmbed()
-				.setColor(SUCCESS_COLOR)
-				.setTitle(`Meme of the Day ${new Date().getMonth() + 1}/${new Date().getDate()}/${new Date().getFullYear()}`)
-				.setDescription(bestMeme.message.content)
-				.setURL(bestMeme.message.url)
-				.addField("Author", `${bestMeme.message.author}`, true)
-				.addField("Score", bestMeme.score, true);
+			const data = {
+				type: 4,
+				data: {
+					embeds: [{
+						title: `Meme of the Day ${new Date().getMonth() + 1}/${new Date().getDate()}/${new Date().getFullYear()}`,
+						type: "rich",
+						color: SUCCESS_COLOR,
+						description: bestMeme.message.content,
+						url: bestMeme.message.url,
+						fields: [
+							{
+								name: "Author",
+								value: `${bestMeme.message.author}`,
+								inline: true
+							},
+							{
+								name: "Score",
+								value: bestMeme.score,
+								inline: true
+							}
+						]
+					}]
+				}
+			}
 
 			// Find attachments.
 			const attachments = [];
-			for (const word of bestMeme.message.content.split(/  +/)) {
+			for (const word of bestMeme.message.content.split(/\s+/)) {
 				if (word.startsWith("http")) { attachments.push(word); }
 			}
 			for (const attachment of bestMeme.message.attachments.values()) {
@@ -244,15 +270,24 @@ client.ws.on("INTERACTION_CREATE", async (interaction) => {
 			}
 
 			// Add attachments to output message.
-			if (attachments.length == 1) {
-				[".png", ".jpg", ".jpeg", ".gif"].forEach((extension) => {
-					// Special case if there is only one attachment and it's an image.
-					if (attachments[0].endsWith(extension)) { output.setImage(attachments[0]); }
-				});
-			}
-			if (!output.image) { output.attachFiles(attachments); }
+			for (const attachment of attachments) {
+				const embed = {
+					title: "Attachment",
+					type: "rich",
+					url: attachment
+				};
 
-			return sendEmbed(output);
+				[".png", ".jpg", ".jpeg", ".gif"].forEach((extension) => {
+					if (attachment.endsWith(extension)) { embed.image = { url: attachment }; }
+				});
+				[".mp4", ".webm", ".mov"].forEach((extension) => {
+					if (attachment.endsWith(extension)) { embed.video = { url: attachment }; }
+				});
+
+				data.data.embeds.push(embed);
+			}
+
+			return client.api.interactions(interaction.id, interaction.token).callback.post({ data });
 	}
 });
 
